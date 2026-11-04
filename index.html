@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SolMon — Solana memecoin monitor</title>
+<title>SolMon — graduated bottom monitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -14,7 +14,7 @@
 <header>
   <div class="brand">
     <svg width="22" height="22" viewBox="0 0 32 32"><path d="M5 23l7-8 6 5 9-11" stroke="#14f195" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    <h1>SolMon</h1><span class="sub">memecoin accumulation monitor</span>
+    <h1>SolMon</h1><span class="sub">graduated coins near the bottom</span>
   </div>
   <div id="stats" class="stats"></div>
   <div class="right">
@@ -26,26 +26,22 @@
 </header>
 
 <section class="controls">
-  <div id="horizon" class="seg" role="group" aria-label="Age horizon">
-    <button data-h="fresh">Fresh &lt;1h</button>
-    <button data-h="young">1–24h</button>
-    <button data-h="both">Both &lt;24h</button>
-    <button data-h="all">All ages</button>
-  </div>
+  <label title="Hours since the coin graduated to a DEX pool">Graduated ≥
+    <select id="minAge"><option value="6">6h ago</option><option value="12">12h ago</option><option value="24">1 day ago</option><option value="72">3 days ago</option><option value="168">1 week ago</option></select>
+  </label>
   <label>Min liq
-    <select id="minLiq"><option value="0">any</option><option value="5000">$5K</option><option value="15000">$15K</option><option value="30000">$30K</option><option value="50000">$50K</option><option value="100000">$100K</option></select>
+    <select id="minLiq"><option value="10000">$10K</option><option value="20000">$20K</option><option value="30000">$30K</option><option value="50000">$50K</option><option value="100000">$100K</option></select>
   </label>
   <label>Max mcap
-    <select id="maxMcap"><option value="1000000">$1M</option><option value="5000000">$5M</option><option value="20000000">$20M</option><option value="50000000">$50M</option><option value="0">any</option></select>
+    <select id="maxMcap"><option value="1000000">$1M</option><option value="5000000">$5M</option><option value="10000000">$10M</option><option value="50000000">$50M</option><option value="0">any</option></select>
   </label>
   <label>Min score <input id="minScore" type="number" min="0" max="100" step="5"></label>
   <label>Signal at ≥ <input id="alertAt" type="number" min="10" max="100" step="5"></label>
   <label>Refresh
     <select id="refreshSec"><option value="20">20s</option><option value="30">30s</option><option value="60">60s</option></select>
   </label>
-  <label class="chk"><input id="rugcheck" type="checkbox"> RugCheck</label>
-  <label class="chk"><input id="hideRisky" type="checkbox"> Hide risky</label>
-  <label class="chk" title="Hide dust MCap, dead, bot-spam, dumped and mint/freeze-enabled coins"><input id="sensible" type="checkbox"> Sensible only</label>
+  <label class="chk" title="Only coins RugCheck has cleared (no danger flags) that pass the sanity checks"><input id="safeOnly" type="checkbox"> Safe only</label>
+  <label class="chk" title="At least 60% below ATH and no more than 60% above the floor"><input id="nearBottom" type="checkbox"> Near bottom</label>
   <label class="chk" title="Fewer columns; MCap and price in one cell"><input id="compact" type="checkbox"> Compact</label>
   <button id="reset" class="ghost" title="Forget all tracked tokens and history">Reset</button>
 </section>
@@ -56,18 +52,24 @@
 </section>
 
 <div id="help" class="help" hidden>
-  <h3>How the score works (0–100)</h3>
+  <h3>What SolMon looks for</h3>
+  <p>Only <b>graduated</b> pump.fun / letsbonk coins (left the bonding curve for PumpSwap or Raydium) that have <b>bled out, built a floor, and are starting to wake up</b>.</p>
+  <h3>Score (0–100)</h3>
   <ul>
-    <li><b>Buy pressure (25)</b> — share of buy transactions in the last 1h and 5m, weighted by how active trading is.</li>
-    <li><b>Volume acceleration (25)</b> — last hour's volume vs its 6h hourly average, and the last 5m vs the hour's pace.</li>
-    <li><b>Quiet accumulation (20)</b> — buyers dominate and volume rises while price is still roughly flat. The "before the move" pattern.</li>
-    <li><b>Liquidity health (15)</b> — liquidity at 5–35% of market cap and a solid dollar depth.</li>
-    <li><b>Live trend (15)</b> — from this page's own snapshots: is liquidity and mcap growing, are buyers consistently in control over the last ~15 min.</li>
-    <li><b>Penalties</b> — already pumped (+250%/24h, +80%/1h), sellers in control, liquidity being pulled, barely trading, RugCheck danger flags, wash-like turnover, no socials, tiny average trades.</li>
-    <li><b>Sensible only</b> — hides coins tagged <code>JUNK</code>: MCap under $20K, under 20 trades/hour, bot spam (avg trade under $10), liquidity under 2% or above 120% of MCap, down 70%+ in 24h, being dumped, rugged, or mint/freeze authority still on.</li>
+    <li><b>Off the top (20)</b> — drawdown from the all-time high. Counts from −50%, full at −70% to −92%, fades to zero past −97% (dead).</li>
+    <li><b>Floor holding (25)</b> — price within ~35% of its post-ATH floor, the floor is at least ~12h old, it has been retested, and the last 6h isn't bleeding.</li>
+    <li><b>Sellers exhausted (20)</b> — buys ≥ sells over 6h and 1h, and the 12h price range is tighter than before.</li>
+    <li><b>Waking up (25)</b> — hourly volume over the last 6h vs the day before, last hour vs the 6h pace, 5m buyers, and an early lift (not a pump yet).</li>
+    <li><b>Liquidity health (10)</b> — liquidity at 8–50% of MCap and real dollar depth.</li>
+    <li><b>Penalties</b> — already 2×+ off the low, still making new lows, +50% in 1h, sellers in control, liquidity being pulled, wash-like volume, no socials, RugCheck warnings.</li>
   </ul>
-  <p>Candidates come from DexScreener (new profiles, boosts, community takeovers) and GeckoTerminal (trending over several timeframes, new, most active and highest-volume pools). Only tokens that have a DEX pool are visible — pump.fun bonding-curve tokens appear after they graduate.</p>
-  <p class="warn">The score is a filter for what deserves a manual look, not a prediction. Most memecoins go to zero. Not financial advice.</p>
+  <h3>Filters</h3>
+  <ul>
+    <li><b>Safe only</b> — RugCheck must have checked the coin and found no danger flags (mint/freeze authority, top-holder concentration, single big holder, low liquidity, rugged). Also hides MCap under $30K, barely trading, bot spam, odd liquidity, and −97%+ coins.</li>
+    <li><b>Near bottom</b> — at least 60% below ATH and no more than 60% above the floor.</li>
+  </ul>
+  <p>ATH and floor come from GeckoTerminal hourly candles (closing prices, last ~40 days). Candles and RugCheck are pulled a few coins at a time, so the list fills in over the first few minutes.</p>
+  <p class="warn">"Safe" only means the known rug signals are absent. A bottomed memecoin can still go to zero, and devs or whales can still dump. The score is a filter for what deserves a manual look, not a prediction. Not financial advice.</p>
 </div>
 
 <main>

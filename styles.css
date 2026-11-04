@@ -52,7 +52,6 @@ td { padding: 6px 8px; border-bottom: 1px solid rgba(31, 42, 55, .6); white-spac
 td.num { text-align: right; } th.r { text-align: right; }
 td.pm b { display: block; font-size: 12.5px; }
 td.pm small { display: block; color: var(--dim); font-size: 10px; line-height: 1.1; }
-.t-junk { color: var(--dim); border-color: var(--line); text-decoration: line-through; }
 .sig .up, .sig .down { font-size: 11px; }
 .dpm { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 4px 0 10px; }
 .dpm div { background: var(--panel2); border-radius: 6px; padding: 6px 8px; font-family: var(--mono); }
@@ -84,12 +83,13 @@ sub { font-size: 9px; }
 .tags { display: flex; gap: 4px; flex-wrap: wrap; }
 .tags.nowrap { flex-wrap: nowrap; }
 .tag { font: 600 9.5px var(--sans); letter-spacing: .3px; padding: 2px 5px; border-radius: 3px; border: 1px solid; }
-.t-accumulating { color: var(--green); border-color: rgba(20,241,149,.4); background: rgba(20,241,149,.08); }
-.t-breakout { color: var(--blue); border-color: rgba(79,163,255,.4); background: rgba(79,163,255,.08); }
-.t-late { color: var(--amber); border-color: rgba(255,181,71,.4); }
-.t-dumping, .t-risky { color: var(--red); border-color: rgba(255,92,122,.4); background: rgba(255,92,122,.07); }
-.t-new { color: var(--violet); border-color: rgba(155,107,255,.4); }
-.t-boosted { color: var(--dim); border-color: var(--line); }
+.t-bottomed { color: var(--green); border-color: rgba(20,241,149,.4); background: rgba(20,241,149,.08); }
+.t-base { color: #a6e86b; border-color: rgba(166,232,107,.4); }
+.t-waking, .t-breakout { color: var(--blue); border-color: rgba(79,163,255,.4); background: rgba(79,163,255,.08); }
+.t-bounced { color: var(--amber); border-color: rgba(255,181,71,.4); }
+.t-falling, .t-risky { color: var(--red); border-color: rgba(255,92,122,.4); background: rgba(255,92,122,.07); }
+.t-safe { color: var(--green); border-color: rgba(20,241,149,.3); }
+.t-unchecked, .t-no-history { color: var(--dim); border-color: var(--line); }
 
 .spark polyline { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .spark polyline.up { stroke: var(--green); } .spark polyline.down { stroke: var(--red); }
