@@ -79,6 +79,31 @@ export function trend(history, now = Date.now()) {
 }
 
 /**
+ * Is this a coin worth looking at at all?
+ * `hard` reasons hide it in "Sensible only" mode; `soft` ones become score penalties.
+ */
+export function quality(t, m, safety = null) {
+  const hard = [], soft = [];
+  const avgTx1 = m.tx1 > 0 ? t.vol.h1 / m.tx1 : 0;
+  if (t.mcap > 0 && t.mcap < 20000) hard.push('MCap under $20K');
+  if (m.tx1 < 20) hard.push('Under 20 trades in the last hour');
+  if (m.tx1 >= 100 && avgTx1 < 10) hard.push('Bot spam: average trade under $10');
+  if (m.liqRatio > 0 && m.liqRatio < 0.02) hard.push('Liquidity under 2% of MCap');
+  if (m.liqRatio > 1.2) hard.push('Liquidity larger than MCap (odd pool)');
+  if (t.pc.h24 < -70) hard.push('Down 70%+ in 24h');
+  if (m.br1 < 0.4 && t.pc.h1 < -25) hard.push('Being dumped');
+  if (safety && !safety.error) {
+    if (safety.rugged) hard.push('Marked rugged');
+    if (safety.risks.some((r) => r.level === 'danger' && /mint|freeze/i.test(r.name || '')))
+      hard.push('Mint or freeze authority still enabled');
+  }
+  if (t.liq > 0 && t.vol.h1 / t.liq > 10) soft.push({ label: '1h volume >10× liquidity (wash?)', pts: 10 });
+  if (!t.socials.length && !t.websites.length) soft.push({ label: 'No socials or website', pts: 8 });
+  if (m.tx1 >= 60 && avgTx1 >= 10 && avgTx1 < 25) soft.push({ label: 'Tiny average trade size', pts: 5 });
+  return { hard, soft, avgTx1 };
+}
+
+/**
  * Score a token.
  * Parts (max): pressure 25, accel 25, quiet accumulation 20, liquidity 15, trend 15 = 100.
  */
@@ -133,6 +158,8 @@ export function score(t, history = [], safety = null, now = Date.now()) {
     if (warn.length) penalties.push({ label: `${warn.length} RugCheck warning(s)`, pts: Math.min(9, warn.length * 3) });
     if (safety.rugged) penalties.push({ label: 'Marked rugged', pts: 100 });
   }
+  const q = quality(t, m, safety);
+  penalties.push(...q.soft);
 
   const raw = Object.values(parts).reduce((s, v) => s + v, 0);
   const pen = penalties.reduce((s, p) => s + p.pts, 0);
@@ -147,8 +174,9 @@ export function score(t, history = [], safety = null, now = Date.now()) {
   if (tr && tr.liqG < -0.15) tags.push('RISKY');
   if (m.ageH < 1) tags.push('NEW');
   if (t.boosts > 0) tags.push('BOOSTED');
+  if (q.hard.length) tags.push('JUNK');
 
-  return { score: total, raw, parts, penalties, tags: [...new Set(tags)], m, tr };
+  return { score: total, raw, parts, penalties, tags: [...new Set(tags)], m, tr, quality: q };
 }
 
 /** Normalise RugCheck /report/summary into {score, risks[], rugged}. */

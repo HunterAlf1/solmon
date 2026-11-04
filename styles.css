@@ -49,7 +49,20 @@ th { position: sticky; top: 0; background: var(--panel); color: var(--dim); font
 th.sortable { cursor: pointer; } th.sortable:hover { color: var(--text); }
 th.desc::after { content: ' ▼'; font-size: 9px; } th.asc::after { content: ' ▲'; font-size: 9px; }
 td { padding: 6px 8px; border-bottom: 1px solid rgba(31, 42, 55, .6); white-space: nowrap; vertical-align: middle; }
-td.num { text-align: right; } th:nth-child(n+5) { text-align: right; } th:nth-child(6), th:nth-child(15) { text-align: left; }
+td.num { text-align: right; } th.r { text-align: right; }
+td.pm b { display: block; font-size: 12.5px; }
+td.pm small { display: block; color: var(--dim); font-size: 10px; line-height: 1.1; }
+.t-junk { color: var(--dim); border-color: var(--line); text-decoration: line-through; }
+.sig .up, .sig .down { font-size: 11px; }
+.dpm { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 4px 0 10px; }
+.dpm div { background: var(--panel2); border-radius: 6px; padding: 6px 8px; font-family: var(--mono); }
+.dpm small { display: block; color: var(--dim); font: 10px var(--sans); text-transform: uppercase; letter-spacing: .6px; }
+.dpm b { font-size: 13px; }
+body.compact td { padding: 4px 7px; }
+body.compact th { padding: 6px 7px; }
+body.compact .tok img, body.compact .tok .ph { width: 20px; height: 20px; }
+body.compact .bs { width: 76px; }
+body.compact .score { width: 48px; }
 tbody tr { cursor: pointer; transition: background .2s; }
 tbody tr:hover { background: var(--panel2); }
 tbody tr.sel { background: rgba(79, 163, 255, .08); box-shadow: inset 2px 0 var(--blue); }

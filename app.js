@@ -5,7 +5,7 @@ const DS = 'https://api.dexscreener.com';
 const GT = 'https://api.geckoterminal.com/api/v2/networks/solana';
 const RC = 'https://api.rugcheck.xyz/v1/tokens';
 const STORE_KEY = 'solmon.v1';
-const MAX_TRACKED = 400;
+const MAX_TRACKED = 500;
 const HISTORY_MAX = 90;
 const EXCLUDE = new Set([
   'So11111111111111111111111111111111111111112', // wSOL
@@ -22,6 +22,8 @@ const DEFAULTS = {
   refreshSec: 30,
   rugcheck: true,
   hideRisky: false,
+  sensible: true,       // hide junk (dust mcap, dead, bot spam, dumped, mint/freeze on)
+  compact: true,        // fewer columns, MCap + price in one cell
 };
 
 // ───────────────────────── state ─────────────────────────
@@ -81,23 +83,41 @@ function track(mint, source) {
   if (!t.sources.includes(source)) t.sources.push(source);
 }
 
+let gtRound = 0;
 async function discover() {
   const sol = (arr) => (Array.isArray(arr) ? arr.filter((x) => x.chainId === 'solana') : []);
-  const jobs = [
+  const dsJobs = [
     ['DS profiles', `${DS}/token-profiles/latest/v1`, (j) => sol(j).forEach((x) => track(x.tokenAddress, 'profile'))],
     ['DS boosts', `${DS}/token-boosts/latest/v1`, (j) => sol(j).forEach((x) => track(x.tokenAddress, 'boost'))],
     ['DS top boosts', `${DS}/token-boosts/top/v1`, (j) => sol(j).forEach((x) => track(x.tokenAddress, 'boost'))],
     ['DS takeovers', `${DS}/community-takeovers/latest/v1`, (j) => sol(j).forEach((x) => track(x.tokenAddress, 'cto'))],
-    ['GT trending', `${GT}/trending_pools?page=1`, gt('trending')],
+  ];
+  // GeckoTerminal allows ~30 req/min, so these run one after another
+  const gtJobs = [
+    // round A
+    ['GT trend 5m', `${GT}/trending_pools?page=1&duration=5m`, gt('trending')],
     ['GT new', `${GT}/new_pools?page=1`, gt('new')],
     ['GT top tx', `${GT}/pools?page=1&sort=h24_tx_count_desc`, gt('active')],
+    ['GT trending', `${GT}/trending_pools?page=1`, gt('trending')],
+    // round B
+    ['GT trend 1h', `${GT}/trending_pools?page=1&duration=1h`, gt('trending')],
+    ['GT new p2', `${GT}/new_pools?page=2`, gt('new')],
+    ['GT top vol', `${GT}/pools?page=1&sort=h24_volume_usd_desc`, gt('active')],
+    ['GT trending p2', `${GT}/trending_pools?page=2`, gt('trending')],
   ];
-  await Promise.all(
-    jobs.map(async ([name, url, fn]) => {
-      const j = await getJSON(url, name);
-      if (j) { fn(j); state.sources[name].count = Array.isArray(j) ? j.length : (j.data || []).length; }
-    })
-  );
+  const run = async ([name, url, fn]) => {
+    const j = await getJSON(url, name);
+    if (j) { fn(j); state.sources[name].count = Array.isArray(j) ? j.length : (j.data || []).length; }
+  };
+  // GT rate-limits bursts (a 429 reaches the browser as a CORS error), so rotate:
+  // 4 GT calls per discovery round, each source refreshed every other round (~2 min)
+  const half = gtJobs.length / 2;
+  const batch = gtJobs.slice((gtRound % 2) * half, (gtRound % 2) * half + half);
+  gtRound++;
+  await Promise.all([
+    ...dsJobs.map(run),
+    (async () => { for (const job of batch) { await run(job); await sleep(1500); } })(),
+  ]);
   state.lastDiscover = Date.now();
 }
 function gt(tag) {
@@ -137,9 +157,9 @@ async function rugQueue() {
   try {
     const now = Date.now();
     const want = [...state.tokens.values()]
-      .filter((t) => t.data && (t.score ?? 0) >= 35 && (!t.safety || now - t.safety.t > 30 * 60e3))
+      .filter((t) => t.data && (t.score ?? 0) >= 30 && !t.result?.quality?.hard.length && (!t.safety || now - t.safety.t > 30 * 60e3))
       .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-      .slice(0, 8);
+      .slice(0, 10);
     for (const t of want) {
       const j = await getJSON(`${RC}/${t.mint}/report/summary`, 'RugCheck');
       t.safety = j ? parseRug(j) : { error: state.sources.RugCheck?.err || 'failed', t: Date.now(), risks: [] };
@@ -168,7 +188,7 @@ function checkAlerts() {
       if (!t.lastAlert || now - t.lastAlert > 30 * 60e3) {
         t.lastAlert = now;
         t.flashUntil = now + 15e3;
-        state.signals.unshift({ t: now, mint: t.mint, symbol: t.data.symbol, score: t.score, tags: t.result.tags });
+        state.signals.unshift({ t: now, mint: t.mint, symbol: t.data.symbol, score: t.score, tags: t.result.tags, mcap: t.data.mcap, price: t.data.priceUsd });
         state.unseen++;
       }
     }
@@ -181,8 +201,9 @@ function prune() {
     if (t.misses >= 3) state.tokens.delete(mint);
   }
   if (state.tokens.size > MAX_TRACKED) {
+    const junk = (t) => (t.result?.quality?.hard.length ? 0 : 1);
     const victims = [...state.tokens.values()]
-      .sort((a, b) => (a.score ?? -1) - (b.score ?? -1) || a.firstSeen - b.firstSeen)
+      .sort((a, b) => junk(a) - junk(b) || (a.score ?? -1) - (b.score ?? -1) || a.firstSeen - b.firstSeen)
       .slice(0, state.tokens.size - MAX_TRACKED);
     victims.forEach((v) => state.tokens.delete(v.mint));
   }
@@ -222,6 +243,7 @@ function visible(t) {
   if (s.maxMcap && d.mcap > s.maxMcap) return false;
   if (t.score < s.minScore) return false;
   if (s.hideRisky && t.result.tags.includes('RISKY')) return false;
+  if (s.sensible && t.result.quality.hard.length) return false;
   return true;
 }
 
@@ -272,14 +294,17 @@ const TAG_TITLE = {
   RISKY: 'RugCheck danger flags or liquidity being pulled',
   NEW: 'Pool is less than 1 hour old',
   BOOSTED: 'Paid DexScreener boost active',
+  JUNK: 'Fails the "Sensible only" quality check (open for reasons)',
 };
 const tagHTML = (tags) => tags.map((g) => `<span class="tag t-${g.toLowerCase()}" title="${TAG_TITLE[g] || ''}">${g}</span>`).join('');
 
 // ───────────────────────── render ─────────────────────────
+// [key, label, shown in compact view, right-aligned]
 const COLS = [
-  ['rank', '#'], ['symbol', 'Token'], ['score', 'Score'], ['tags', 'Signals'], ['price', 'Price'], ['spark', 'Trend'],
-  ['m5', '5m'], ['h1', '1h'], ['h6', '6h'], ['h24', '24h'], ['mcap', 'MCap'], ['liq', 'Liq'],
-  ['vol1', 'Vol 1h'], ['accel', 'Accel'], ['bs', 'Buys/Sells 1h'], ['age', 'Age'], ['safe', 'Safety'],
+  ['rank', '#', 1, 0], ['symbol', 'Token', 1, 0], ['score', 'Score', 1, 0], ['tags', 'Signals', 1, 0],
+  ['mcap', 'MCap · Price', 1, 1], ['spark', 'Trend', 1, 0],
+  ['m5', '5m', 0, 1], ['h1', '1h', 1, 1], ['h6', '6h', 0, 1], ['h24', '24h', 1, 1], ['liq', 'Liq', 1, 1],
+  ['vol1', 'Vol 1h', 0, 1], ['accel', 'Accel', 0, 1], ['bs', 'Buys/Sells 1h', 1, 0], ['age', 'Age', 1, 1], ['safe', 'Safety', 0, 1],
 ];
 const SORTERS = {
   score: (t) => t.score, symbol: (t) => t.data.symbol.toLowerCase(), price: (t) => t.data.priceUsd,
@@ -293,9 +318,12 @@ function render() {
   const key = state.sort.key, dir = state.sort.dir, f = SORTERS[key] || SORTERS.score;
   rows.sort((a, b) => { const x = f(a), y = f(b); return (x > y ? 1 : x < y ? -1 : 0) * dir || b.score - a.score; });
   const now = Date.now();
+  const compact = state.settings.compact;
+  const cols = COLS.filter((c) => !compact || c[2]);
+  document.body.classList.toggle('compact', compact);
 
-  $('#thead').innerHTML = '<tr>' + COLS.map(([k, l]) =>
-    `<th data-k="${k}" class="${SORTERS[k] ? 'sortable' : ''} ${key === k ? (dir < 0 ? 'desc' : 'asc') : ''}">${l}</th>`).join('') + '</tr>';
+  $('#thead').innerHTML = '<tr>' + cols.map(([k, l, , num]) =>
+    `<th data-k="${k}" class="${SORTERS[k] ? 'sortable' : ''} ${num ? 'r' : ''} ${key === k ? (dir < 0 ? 'desc' : 'asc') : ''}">${l}</th>`).join('') + '</tr>';
 
   $('#tbody').innerHTML = rows.slice(0, 150).map((t, i) => {
     const d = t.data, r = t.result, m = r.m;
@@ -304,25 +332,32 @@ function render() {
       : !t.safety ? '<span class="dim">…</span>'
       : t.safety.error ? '<span class="dim" title="' + esc(t.safety.error) + '">n/a</span>'
       : `<span class="${t.safety.risks.some((x) => x.level === 'danger') ? 'down' : t.safety.risks.length ? 'warn' : 'up'}" title="${esc(t.safety.risks.map((x) => x.name).join(', ') || 'No risks reported')}">${t.safety.risks.filter((x) => x.level === 'danger').length ? '⚠ ' : '✓ '}${t.safety.risks.length}</span>`;
-    return `<tr data-mint="${t.mint}" class="${t.flashUntil > now ? 'flash' : ''} ${state.selected === t.mint ? 'sel' : ''}">
-      <td class="dim">${i + 1}</td>
-      <td class="tok">${d.icon ? `<img src="${esc(d.icon)}" loading="lazy" onerror="this.remove()">` : '<span class="ph"></span>'}<div><b>${esc(d.symbol)}</b><small>${esc(d.name.slice(0, 22))}</small></div></td>
-      <td><div class="score ${scoreClass(t.score)}"><span>${t.score}</span><i style="width:${t.score}%"></i></div></td>
-      <td><div class="tags nowrap">${tagHTML(r.tags)}</div></td>
-      <td class="num">${price(d.priceUsd)}</td>
-      <td>${spark(t.history)}</td>
-      <td class="num">${pct(d.pc.m5)}</td><td class="num">${pct(d.pc.h1)}</td><td class="num">${pct(d.pc.h6)}</td><td class="num">${pct(d.pc.h24)}</td>
-      <td class="num">${usd(d.mcap)}</td><td class="num">${usd(d.liq)}</td><td class="num">${usd(d.vol.h1)}</td>
-      <td class="num ${m.accel1 >= 2 ? 'up' : m.accel1 < 0.7 ? 'dim' : ''}">${m.ageH < 1.5 ? '<span class="dim">new</span>' : m.accel1.toFixed(1) + '×'}</td>
-      <td><div class="bs" title="${b} buys / ${s} sells"><i style="width:${bw}%"></i><span>${b}/${s}</span></div></td>
-      <td class="num">${age(m.ageH)}</td>
-      <td class="num">${safe}</td>
-    </tr>`;
-  }).join('') || `<tr><td colspan="${COLS.length}" class="empty">${state.tokens.size ? 'No tokens match the current filters.' : 'Collecting candidates… first results in a few seconds.'}</td></tr>`;
+    const cell = {
+      rank: `<td class="dim">${i + 1}</td>`,
+      symbol: `<td class="tok">${d.icon ? `<img src="${esc(d.icon)}" loading="lazy" onerror="this.remove()">` : '<span class="ph"></span>'}<div><b>${esc(d.symbol)}</b><small>${esc(d.name.slice(0, compact ? 16 : 22))}</small></div></td>`,
+      score: `<td><div class="score ${scoreClass(t.score)}"><span>${t.score}</span><i style="width:${t.score}%"></i></div></td>`,
+      tags: `<td><div class="tags nowrap">${tagHTML(compact ? r.tags.filter((g) => g !== 'BOOSTED') : r.tags)}</div></td>`,
+      mcap: `<td class="num pm"><b>${usd(d.mcap)}</b><small>${price(d.priceUsd)}</small></td>`,
+      spark: `<td>${spark(t.history, 'mcap')}</td>`,
+      m5: `<td class="num">${pct(d.pc.m5)}</td>`, h1: `<td class="num">${pct(d.pc.h1)}</td>`,
+      h6: `<td class="num">${pct(d.pc.h6)}</td>`, h24: `<td class="num">${pct(d.pc.h24)}</td>`,
+      liq: `<td class="num">${usd(d.liq)}</td>`, vol1: `<td class="num">${usd(d.vol.h1)}</td>`,
+      accel: `<td class="num ${m.accel1 >= 2 ? 'up' : m.accel1 < 0.7 ? 'dim' : ''}">${m.ageH < 1.5 ? '<span class="dim">new</span>' : m.accel1.toFixed(1) + '×'}</td>`,
+      bs: `<td><div class="bs" title="${b} buys / ${s} sells"><i style="width:${bw}%"></i><span>${b}/${s}</span></div></td>`,
+      age: `<td class="num">${age(m.ageH)}</td>`,
+      safe: `<td class="num">${safe}</td>`,
+    };
+    return `<tr data-mint="${t.mint}" class="${t.flashUntil > now ? 'flash' : ''} ${state.selected === t.mint ? 'sel' : ''}">${cols.map(([k]) => cell[k]).join('')}</tr>`;
+  }).join('') || `<tr><td colspan="${cols.length}" class="empty">${state.tokens.size ? 'No tokens match the current filters.' : 'Collecting candidates… first results in a few seconds.'}</td></tr>`;
 
-  // signals strip
+  // signals strip: MCap when it fired → MCap now
   $('#signals').innerHTML = state.signals.length
-    ? state.signals.slice(0, 12).map((g) => `<button class="sig" data-mint="${g.mint}"><b>${esc(g.symbol)}</b> <span class="${scoreClass(g.score)}">${g.score}</span> <small>${ago(g.t)}</small></button>`).join('')
+    ? state.signals.slice(0, 12).map((g) => {
+        const nowMcap = state.tokens.get(g.mint)?.data?.mcap;
+        const move = g.mcap && nowMcap ? ((nowMcap - g.mcap) / g.mcap) * 100 : null;
+        const mc = g.mcap ? ` <span class="dim">${usd(g.mcap)}</span>${nowMcap && move != null && Math.abs(move) >= 0.5 ? `→${usd(nowMcap)} ${pct(move)}` : ''}` : '';
+        return `<button class="sig" data-mint="${g.mint}" title="${g.price ? 'Price at signal ' + price(g.price).replace(/<\/?sub>/g, '') : ''}"><b>${esc(g.symbol)}</b> <span class="${scoreClass(g.score)}">${g.score}</span>${mc} <small>${ago(g.t)}</small></button>`;
+      }).join('')
     : `<span class="dim">Tokens crossing score ${state.settings.alertAt} will appear here.</span>`;
   $('#sigcount').textContent = state.unseen ? state.unseen : '';
   $('#sigcount').hidden = !state.unseen;
@@ -330,7 +365,8 @@ function render() {
 
   // stats
   const withData = [...state.tokens.values()].filter((t) => t.result);
-  $('#stats').innerHTML = `<span>Tracking <b>${withData.length}</b></span><span>Showing <b>${rows.length}</b></span><span>Hot ≥${state.settings.alertAt}: <b class="s-hot">${rows.filter((t) => t.score >= state.settings.alertAt).length}</b></span>`;
+  const junk = withData.filter((t) => t.result.quality.hard.length).length;
+  $('#stats').innerHTML = `<span>Tracking <b>${withData.length}</b></span><span title="Hidden by Sensible only">Junk <b>${junk}</b></span><span>Showing <b>${rows.length}</b></span><span>Hot ≥${state.settings.alertAt}: <b class="s-hot">${rows.filter((t) => t.score >= state.settings.alertAt).length}</b></span>`;
 
   // sources
   $('#sources').innerHTML = Object.entries(state.sources).map(([k, v]) =>
@@ -353,7 +389,9 @@ function renderDetail() {
     <div class="dh">${d.icon ? `<img src="${esc(d.icon)}" onerror="this.remove()">` : ''}<div><h2>${esc(d.symbol)} <small>${esc(d.name)}</small></h2>
       <code class="mint" title="Click to copy" data-copy="${t.mint}">${t.mint.slice(0, 6)}…${t.mint.slice(-6)}</code></div>
       <div class="bigscore ${scoreClass(t.score)}">${t.score}</div></div>
+    <div class="dpm"><div><small>MCap</small><b>${usd(d.mcap)}</b></div><div><small>Price</small><b>${price(d.priceUsd)}</b></div><div><small>Liq</small><b>${usd(d.liq)}</b></div><div><small>24h</small><b>${pct(d.pc.h24)}</b></div></div>
     <div class="tags">${tagHTML(r.tags)}</div>
+    ${r.quality.hard.length ? `<h3>Filtered as junk</h3><ul class="risks">${r.quality.hard.map((x) => `<li class="danger">${esc(x)}</li>`).join('')}</ul>` : ''}
     <h3>Why this score</h3>
     ${Object.keys(MAX).map((k) => `<div class="part"><span>${LABEL[k]}</span><div class="pbar"><i style="width:${(r.parts[k] / MAX[k]) * 100}%"></i></div><b>${r.parts[k].toFixed(1)}<small>/${MAX[k]}</small></b></div>`).join('')}
     ${r.penalties.map((p) => `<div class="part pen"><span>${esc(p.label)}</span><div></div><b>−${p.pts}</b></div>`).join('')}
@@ -361,6 +399,7 @@ function renderDetail() {
     <dl>
       <dt>Buy ratio 5m / 1h / 6h</dt><dd>${(m.br5 * 100).toFixed(0)}% / ${(m.br1 * 100).toFixed(0)}% / ${(m.br6 * 100).toFixed(0)}%</dd>
       <dt>Txns 1h</dt><dd>${d.txns.h1.buys} buys · ${d.txns.h1.sells} sells</dd>
+      <dt>Avg trade 1h</dt><dd>${usd(r.quality.avgTx1)}</dd>
       <dt>Volume 1h vs hourly avg</dt><dd>${m.accel1.toFixed(2)}×</dd>
       <dt>Volume 5m vs 1h pace</dt><dd>${m.accel5.toFixed(2)}×</dd>
       <dt>Liquidity / MCap</dt><dd>${(m.liqRatio * 100).toFixed(1)}%</dd>
@@ -369,7 +408,7 @@ function renderDetail() {
       <dt>Found via</dt><dd>${t.sources.join(', ')} · ${ago(t.firstSeen)} ago</dd>
       <dt>Live trend</dt><dd>${tr ? `liq ${(tr.liqG * 100).toFixed(1)}%, mcap ${(tr.mcapG * 100).toFixed(1)}% over ${tr.spanMin.toFixed(0)}m (${tr.n} snapshots)` : '<span class="dim">needs ~3 min of snapshots</span>'}</dd>
     </dl>
-    <h3>Price since tracked</h3><div class="bigspark">${spark(t.history).replace('width="70" height="20"', 'width="100%" height="60" viewBox="0 0 70 20" preserveAspectRatio="none"')}</div>
+    <h3>MCap since tracked</h3><div class="bigspark">${spark(t.history, 'mcap').replace('width="70" height="20"', 'width="100%" height="60" viewBox="0 0 70 20" preserveAspectRatio="none"')}</div>
     <h3>Safety (RugCheck)</h3>
     ${!state.settings.rugcheck ? '<p class="dim">RugCheck disabled.</p>'
       : !t.safety ? '<p class="dim">Queued — checked once score ≥ 35.</p>'
@@ -408,6 +447,8 @@ function bindControls() {
   bind('refreshSec', 'refreshSec', Number);
   bind('rugcheck', 'rugcheck');
   bind('hideRisky', 'hideRisky');
+  bind('sensible', 'sensible');
+  bind('compact', 'compact');
 
   document.querySelectorAll('#horizon button').forEach((b) => {
     b.classList.toggle('on', b.dataset.h === s.horizon);

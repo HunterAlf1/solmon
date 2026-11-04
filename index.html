@@ -45,6 +45,8 @@
   </label>
   <label class="chk"><input id="rugcheck" type="checkbox"> RugCheck</label>
   <label class="chk"><input id="hideRisky" type="checkbox"> Hide risky</label>
+  <label class="chk" title="Hide dust MCap, dead, bot-spam, dumped and mint/freeze-enabled coins"><input id="sensible" type="checkbox"> Sensible only</label>
+  <label class="chk" title="Fewer columns; MCap and price in one cell"><input id="compact" type="checkbox"> Compact</label>
   <button id="reset" class="ghost" title="Forget all tracked tokens and history">Reset</button>
 </section>
 
@@ -61,9 +63,10 @@
     <li><b>Quiet accumulation (20)</b> — buyers dominate and volume rises while price is still roughly flat. The "before the move" pattern.</li>
     <li><b>Liquidity health (15)</b> — liquidity at 5–35% of market cap and a solid dollar depth.</li>
     <li><b>Live trend (15)</b> — from this page's own snapshots: is liquidity and mcap growing, are buyers consistently in control over the last ~15 min.</li>
-    <li><b>Penalties</b> — already pumped (+250%/24h, +80%/1h), sellers in control, liquidity being pulled, barely trading, RugCheck danger flags.</li>
+    <li><b>Penalties</b> — already pumped (+250%/24h, +80%/1h), sellers in control, liquidity being pulled, barely trading, RugCheck danger flags, wash-like turnover, no socials, tiny average trades.</li>
+    <li><b>Sensible only</b> — hides coins tagged <code>JUNK</code>: MCap under $20K, under 20 trades/hour, bot spam (avg trade under $10), liquidity under 2% or above 120% of MCap, down 70%+ in 24h, being dumped, rugged, or mint/freeze authority still on.</li>
   </ul>
-  <p>Candidates come from DexScreener (new profiles, boosts, community takeovers) and GeckoTerminal (trending, new, most active pools). Only tokens that have a DEX pool are visible — pump.fun bonding-curve tokens appear after they graduate.</p>
+  <p>Candidates come from DexScreener (new profiles, boosts, community takeovers) and GeckoTerminal (trending over several timeframes, new, most active and highest-volume pools). Only tokens that have a DEX pool are visible — pump.fun bonding-curve tokens appear after they graduate.</p>
   <p class="warn">The score is a filter for what deserves a manual look, not a prediction. Most memecoins go to zero. Not financial advice.</p>
 </div>
 

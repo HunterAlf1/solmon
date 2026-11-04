@@ -11,11 +11,11 @@ No backend, no API keys. The page polls free public APIs straight from your brow
 | Source | Used for | Limit |
 |---|---|---|
 | DexScreener `token-profiles`, `token-boosts` (latest/top), `community-takeovers` | Discovering candidates | 60 req/min |
-| GeckoTerminal `trending_pools`, `new_pools`, `pools?sort=h24_tx_count_desc` | Discovering candidates | ~30 req/min |
+| GeckoTerminal `trending_pools` (default, 5m, 1h, page 2), `new_pools` (pages 1–2), `pools?sort=h24_tx_count_desc`, `pools?sort=h24_volume_usd_desc` | Discovering candidates; 4 calls per round, rotated so each refreshes every ~2 min | ~30 req/min, bursts get blocked |
 | DexScreener `tokens/v1/solana/{mints}` | Price, txns, volume, liquidity, mcap for every tracked token (30 per call) | 300 req/min |
 | RugCheck `tokens/{mint}/report/summary` | Safety flags, queried only for tokens scoring ≥ 35, cached 30 min | — |
 
-Discovery runs about once a minute. Enrichment runs every refresh (20/30/60 s). Up to 400 tokens are tracked; tokens with no pool for 3 cycles are dropped.
+Discovery runs about once a minute. Enrichment runs every refresh (20/30/60 s). Up to 500 tokens are tracked; tokens with no pool for 3 cycles are dropped, and junk is dropped first when the cap is hit.
 
 **Blind spot:** only tokens with a DEX pool are visible. pump.fun tokens show up once they graduate from the bonding curve.
 
@@ -29,9 +29,13 @@ Discovery runs about once a minute. Enrichment runs every refresh (20/30/60 s). 
 | Liquidity health | 15 | Liquidity at 5–35% of mcap, plus dollar depth |
 | Live trend | 15 | From the page's own snapshots: liquidity/mcap growth and sustained buy ratio over ~15 min |
 
-**Penalties:** +250%/+500% in 24h, +80% in 1h, sellers in control, −40% in 6h, barely trading, liquidity pulled >15%, RugCheck danger/warn flags, rugged.
+**Penalties:** +250%/+500% in 24h, +80% in 1h, sellers in control, −40% in 6h, barely trading, liquidity pulled >15%, RugCheck danger/warn flags, rugged, 1h volume >10× liquidity (wash-like), no socials or website, tiny average trade size.
 
-**Tags:** `ACCUMULATING`, `BREAKOUT`, `LATE`, `DUMPING`, `RISKY`, `NEW`, `BOOSTED`.
+**Sensible only** (on by default) hides coins tagged `JUNK`: MCap under $20K, under 20 trades in the last hour, bot spam (average trade under $10), liquidity under 2% or over 120% of MCap, down 70%+ in 24h, being dumped, rugged, or mint/freeze authority still enabled. Open a coin to see why it was flagged.
+
+**Compact** (on by default) shows fewer columns, with MCap and price stacked in one cell and an MCap trend line. The ⚡ Signals strip shows MCap when the signal fired → MCap now.
+
+**Tags:** `ACCUMULATING`, `BREAKOUT`, `LATE`, `DUMPING`, `RISKY`, `NEW`, `BOOSTED`, `JUNK`.
 
 **Signals:** when a visible token crosses the "Signal at" threshold, it flashes in the table and appears in the ⚡ Signals strip. The tab title shows the unseen count. Each token re-signals at most once per 30 min.
 
