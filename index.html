@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolMon — Solana memecoin monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230b0f14'/><path d='M7 22l6-7 5 4 7-9' stroke='%2314f195' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg width="22" height="22" viewBox="0 0 32 32"><path d="M5 23l7-8 6 5 9-11" stroke="#14f195" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <h1>SolMon</h1><span class="sub">memecoin accumulation monitor</span>
+  </div>
+  <div id="stats" class="stats"></div>
+  <div class="right">
+    <span id="status" class="dim"></span>
+    <span id="countdown" class="dim"></span>
+    <button id="refresh" title="Refresh now">↻ Refresh</button>
+    <button id="helpBtn" title="How scoring works">?</button>
+  </div>
+</header>
+
+<section class="controls">
+  <div id="horizon" class="seg" role="group" aria-label="Age horizon">
+    <button data-h="fresh">Fresh &lt;1h</button>
+    <button data-h="young">1–24h</button>
+    <button data-h="both">Both &lt;24h</button>
+    <button data-h="all">All ages</button>
+  </div>
+  <label>Min liq
+    <select id="minLiq"><option value="0">any</option><option value="5000">$5K</option><option value="15000">$15K</option><option value="30000">$30K</option><option value="50000">$50K</option><option value="100000">$100K</option></select>
+  </label>
+  <label>Max mcap
+    <select id="maxMcap"><option value="1000000">$1M</option><option value="5000000">$5M</option><option value="20000000">$20M</option><option value="50000000">$50M</option><option value="0">any</option></select>
+  </label>
+  <label>Min score <input id="minScore" type="number" min="0" max="100" step="5"></label>
+  <label>Signal at ≥ <input id="alertAt" type="number" min="10" max="100" step="5"></label>
+  <label>Refresh
+    <select id="refreshSec"><option value="20">20s</option><option value="30">30s</option><option value="60">60s</option></select>
+  </label>
+  <label class="chk"><input id="rugcheck" type="checkbox"> RugCheck</label>
+  <label class="chk"><input id="hideRisky" type="checkbox"> Hide risky</label>
+  <button id="reset" class="ghost" title="Forget all tracked tokens and history">Reset</button>
+</section>
+
+<section class="signalbar">
+  <button id="sigbell" class="bell" title="Mark signals seen">⚡ Signals <span id="sigcount" class="badge" hidden></span></button>
+  <div id="signals" class="signals"></div>
+</section>
+
+<div id="help" class="help" hidden>
+  <h3>How the score works (0–100)</h3>
+  <ul>
+    <li><b>Buy pressure (25)</b> — share of buy transactions in the last 1h and 5m, weighted by how active trading is.</li>
+    <li><b>Volume acceleration (25)</b> — last hour's volume vs its 6h hourly average, and the last 5m vs the hour's pace.</li>
+    <li><b>Quiet accumulation (20)</b> — buyers dominate and volume rises while price is still roughly flat. The "before the move" pattern.</li>
+    <li><b>Liquidity health (15)</b> — liquidity at 5–35% of market cap and a solid dollar depth.</li>
+    <li><b>Live trend (15)</b> — from this page's own snapshots: is liquidity and mcap growing, are buyers consistently in control over the last ~15 min.</li>
+    <li><b>Penalties</b> — already pumped (+250%/24h, +80%/1h), sellers in control, liquidity being pulled, barely trading, RugCheck danger flags.</li>
+  </ul>
+  <p>Candidates come from DexScreener (new profiles, boosts, community takeovers) and GeckoTerminal (trending, new, most active pools). Only tokens that have a DEX pool are visible — pump.fun bonding-curve tokens appear after they graduate.</p>
+  <p class="warn">The score is a filter for what deserves a manual look, not a prediction. Most memecoins go to zero. Not financial advice.</p>
+</div>
+
+<main>
+  <div class="tablewrap">
+    <table>
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <aside id="detail" class="detail" hidden></aside>
+</main>
+
+<footer>
+  <div id="sources" class="sources"></div>
+  <span class="dim">Data: DexScreener · GeckoTerminal · RugCheck. Runs entirely in your browser; settings and history are kept locally.</span>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
